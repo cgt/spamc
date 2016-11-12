@@ -17,12 +17,33 @@ var (
 	spamDetailsRe = regexp.MustCompile(`^(-?[0-9\.]*)\s([a-zA-Z0-9_]*)(\W*)([\w:\s-]*)`)
 )
 
-type Client struct {
-	Addr string
+// connection is like net.Conn except that it also has a CloseWrite method.
+// CloseWrite is implemented by net.TCPConn and net.UnixConn, but for some
+// reason it is not present in the net.Conn interface.
+type connection interface {
+	net.Conn
+	CloseWrite() error
 }
 
+// Client is a spamd client.
+type Client struct {
+	net  string
+	addr string
+}
+
+// NewTCP returns a *Client that connects to spamd via the given TCP address.
+func NewTCP(addr string) *Client {
+	return &Client{"tcp", addr}
+}
+
+// NewTCP returns a *Client that connects to spamd via the given Unix socket.
+func NewUnix(addr string) *Client {
+	return &Client{"unix", addr}
+}
+
+// Header represents a matched SpamAssassin rule.
 type Header struct {
-	Pts         string
+	Points      string
 	RuleName    string
 	Description string
 }
@@ -36,6 +57,24 @@ type Result struct {
 	Details      []Header
 }
 
+// dial connects to spamd through TCP or a Unix socket.
+func (c *Client) dial() (connection, error) {
+	if c.net == "tcp" {
+		tcpAddr, err := net.ResolveTCPAddr("tcp", c.addr)
+		if err != nil {
+			return nil, err
+		}
+		return net.DialTCP("tcp", nil, tcpAddr)
+	} else if c.net == "unix" {
+		unixAddr, err := net.ResolveUnixAddr("unix", c.addr)
+		if err != nil {
+			return nil, err
+		}
+		return net.DialUnix("unix", nil, unixAddr)
+	}
+	panic("Client.net must be either \"tcp\" or \"unix\"")
+}
+
 func (c *Client) CheckEmail(email []byte) (Result, error) {
 	output, err := c.checkEmail(email)
 	if err != nil {
@@ -45,19 +84,7 @@ func (c *Client) CheckEmail(email []byte) (Result, error) {
 }
 
 func (c *Client) checkEmail(email []byte) ([]string, error) {
-	host, port, err := net.SplitHostPort(c.Addr)
-	if err != nil {
-		return nil, err
-	}
-	intport, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-	addr := &net.TCPAddr{
-		IP:   net.ParseIP(host),
-		Port: intport,
-	}
-	conn, err := net.DialTCP("tcp", nil, addr)
+	conn, err := c.dial()
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +167,7 @@ func (c *Client) parseOutput(output []string) Result {
 		if spamDetailsRe.MatchString(row) {
 			res := spamDetailsRe.FindStringSubmatch(row)
 			if len(res) == 5 {
-				header := Header{Pts: res[1], RuleName: res[2], Description: res[4]}
+				header := Header{Points: res[1], RuleName: res[2], Description: res[4]}
 				result.Details = append(result.Details, header)
 			}
 		}
