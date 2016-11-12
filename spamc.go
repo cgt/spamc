@@ -91,7 +91,7 @@ func (c *Client) checkEmail(email []byte) ([]string, error) {
 	defer conn.Close()
 
 	bw := bufio.NewWriter(conn)
-	_, err = bw.WriteString("REPORT SPAMC/1.2\r\n")
+	_, err = bw.WriteString("REPORT SPAMC/1.5\r\n")
 	if err != nil {
 		return nil, err
 	}
