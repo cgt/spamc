@@ -75,15 +75,16 @@ func (c *Client) dial() (connection, error) {
 	panic("Client.net must be either \"tcp\" or \"unix\"")
 }
 
-func (c *Client) CheckEmail(email []byte) (Result, error) {
-	output, err := c.checkEmail(email)
+// Report checks if message is spam or not, and returns score plus report
+func (c *Client) Report(email []byte) (Result, error) {
+	output, err := c.report(email)
 	if err != nil {
 		return Result{}, err
 	}
 	return c.parseOutput(output), nil
 }
 
-func (c *Client) checkEmail(email []byte) ([]string, error) {
+func (c *Client) report(email []byte) ([]string, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, err
