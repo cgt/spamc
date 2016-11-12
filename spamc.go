@@ -1,11 +1,9 @@
+// Package spamc provides a client for the SpamAssassin spamd protocol.
 // http://svn.apache.org/repos/asf/spamassassin/trunk/spamd/PROTOCOL
-package spamassassin
+package spamc
 
 import (
 	"bufio"
-	"encoding/json"
-	"errors"
-	"github.com/le0pard/go-falcon/config"
 	"io"
 	"net"
 	"regexp"
@@ -19,88 +17,83 @@ var (
 	spamDetailsRe = regexp.MustCompile(`^(-?[0-9\.]*)\s([a-zA-Z0-9_]*)(\W*)([\w:\s-]*)`)
 )
 
-type Spamassassin struct {
-	config   *config.Config
-	RawEmail []byte
+type Client struct {
+	Addr string
 }
 
-type SpamassassinHeader struct {
+type Header struct {
 	Pts         string
 	RuleName    string
 	Description string
 }
 
-type SpamassassinResponse struct {
-	ResponseCode    int
-	ResponseMessage string
-	Score           float64
-	Spam            bool
-	Threshold       float64
-	Details         []SpamassassinHeader
+type Result struct {
+	ResponseCode int
+	Message      string
+	Spam         bool
+	Score        float64
+	Threshold    float64
+	Details      []Header
 }
 
-// check email by spamassassin
-
-func CheckSpamEmail(config *config.Config, email []byte) (string, error) {
-	spamassassin := &Spamassassin{
-		config:   config,
-		RawEmail: email,
-	}
-	output, err := spamassassin.checkEmail()
+func (c *Client) CheckEmail(email []byte) (Result, error) {
+	output, err := c.checkEmail(email)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	response := spamassassin.parseOutput(output)
-	jsonResult, err := json.Marshal(response)
-	if err != nil {
-		return "", err
-	}
-	return string(jsonResult), nil
+	return c.parseOutput(output), nil
 }
 
-// check email by spamassassin
-
-func (ss *Spamassassin) checkEmail() ([]string, error) {
-	var dataArrays []string
-	ip := net.ParseIP(ss.config.Spamassassin.Ip)
-	if ip == nil {
-		return dataArrays, errors.New("Invalid ip address")
+func (c *Client) checkEmail(email []byte) ([]string, error) {
+	host, port, err := net.SplitHostPort(c.Addr)
+	if err != nil {
+		return nil, err
+	}
+	intport, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, err
 	}
 	addr := &net.TCPAddr{
-		IP:   ip,
-		Port: ss.config.Spamassassin.Port,
+		IP:   net.ParseIP(host),
+		Port: intport,
 	}
 	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
-		return dataArrays, err
+		return nil, err
 	}
 	defer conn.Close()
-	// write headers
-	_, err = conn.Write([]byte("REPORT SPAMC/1.2\r\n"))
+
+	bw := bufio.NewWriter(conn)
+	_, err = bw.WriteString("REPORT SPAMC/1.2\r\n")
 	if err != nil {
-		return dataArrays, err
+		return nil, err
 	}
-	_, err = conn.Write([]byte("Content-length: " + strconv.Itoa(len(ss.RawEmail)) + "\r\n\r\n"))
+	_, err = bw.WriteString("Content-length: " + strconv.Itoa(len(email)) + "\r\n\r\n")
 	if err != nil {
-		return dataArrays, err
+		return nil, err
 	}
-	// write email
-	_, err = conn.Write(ss.RawEmail)
+	_, err = bw.Write(email)
 	if err != nil {
-		return dataArrays, err
+		return nil, err
 	}
-	// force close writer
-	conn.CloseWrite()
-	// read data
-	reader := bufio.NewReader(conn)
-	// reading
+	// Client is supposed to close its writing side of the connection
+	// after sending its request.
+	err = conn.CloseWrite()
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		dataArrays []string
+		br         = bufio.NewReader(conn)
+	)
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := br.ReadString('\n')
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return dataArrays, err
+			return nil, err
 		}
 		line = strings.TrimRight(line, " \t\r\n")
 		dataArrays = append(dataArrays, line)
@@ -109,10 +102,8 @@ func (ss *Spamassassin) checkEmail() ([]string, error) {
 	return dataArrays, nil
 }
 
-// parse spamassassin output
-
-func (ss *Spamassassin) parseOutput(output []string) *SpamassassinResponse {
-	response := &SpamassassinResponse{}
+func (c *Client) parseOutput(output []string) Result {
+	var result Result
 	for _, row := range output {
 		// header
 		if spamInfoRe.MatchString(row) {
@@ -120,9 +111,9 @@ func (ss *Spamassassin) parseOutput(output []string) *SpamassassinResponse {
 			if len(res) == 5 {
 				resCode, err := strconv.Atoi(res[3])
 				if err == nil {
-					response.ResponseCode = resCode
+					result.ResponseCode = resCode
 				}
-				response.ResponseMessage = res[4]
+				result.Message = res[4]
 			}
 		}
 		// summary
@@ -130,17 +121,17 @@ func (ss *Spamassassin) parseOutput(output []string) *SpamassassinResponse {
 			res := spamMainRe.FindStringSubmatch(row)
 			if len(res) == 4 {
 				if strings.ToLower(res[1]) == "true" || strings.ToLower(res[1]) == "yes" {
-					response.Spam = true
+					result.Spam = true
 				} else {
-					response.Spam = false
+					result.Spam = false
 				}
 				resFloat, err := strconv.ParseFloat(res[2], 64)
 				if err == nil {
-					response.Score = resFloat
+					result.Score = resFloat
 				}
 				resFloat, err = strconv.ParseFloat(res[3], 64)
 				if err == nil {
-					response.Threshold = resFloat
+					result.Threshold = resFloat
 				}
 			}
 		}
@@ -149,10 +140,10 @@ func (ss *Spamassassin) parseOutput(output []string) *SpamassassinResponse {
 		if spamDetailsRe.MatchString(row) {
 			res := spamDetailsRe.FindStringSubmatch(row)
 			if len(res) == 5 {
-				header := SpamassassinHeader{Pts: res[1], RuleName: res[2], Description: res[4]}
-				response.Details = append(response.Details, header)
+				header := Header{Pts: res[1], RuleName: res[2], Description: res[4]}
+				result.Details = append(result.Details, header)
 			}
 		}
 	}
-	return response
+	return result
 }
