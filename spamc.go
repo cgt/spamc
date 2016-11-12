@@ -119,8 +119,8 @@ func (c *Client) report(email []byte) ([]string, error) {
 	}
 
 	var (
-		dataArrays []string
-		br         = bufio.NewReader(conn)
+		lines []string
+		br    = bufio.NewReader(conn)
 	)
 	for {
 		line, err := br.ReadString('\n')
@@ -131,10 +131,10 @@ func (c *Client) report(email []byte) ([]string, error) {
 			return nil, err
 		}
 		line = strings.TrimRight(line, " \t\r\n")
-		dataArrays = append(dataArrays, line)
+		lines = append(lines, line)
 	}
 
-	return dataArrays, nil
+	return lines, nil
 }
 
 func (c *Client) parseOutput(output []string) Result {
