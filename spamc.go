@@ -103,6 +103,10 @@ func (c *Client) checkEmail(email []byte) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = bw.Flush()
+	if err != nil {
+		return nil, err
+	}
 	// Client is supposed to close its writing side of the connection
 	// after sending its request.
 	err = conn.CloseWrite()
