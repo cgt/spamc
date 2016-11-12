@@ -4,6 +4,7 @@ package spamc
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net"
 	"regexp"
@@ -180,4 +181,33 @@ func (c *Client) parseOutput(output []string) Result {
 		}
 	}
 	return result
+}
+
+func (c *Client) Ping() error {
+	conn, err := c.dial()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = io.WriteString(conn, fmt.Sprintf("PING SPAMC/%s\r\n\r\n", ProtoVersion))
+	if err != nil {
+		return err
+	}
+	err = conn.CloseWrite()
+	if err != nil {
+		return err
+	}
+
+	br := bufio.NewReader(conn)
+	for {
+		_, err = br.ReadSlice('\n')
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
