@@ -1,6 +1,6 @@
 // Package spamc provides a client for the SpamAssassin spamd protocol.
 // http://svn.apache.org/repos/asf/spamassassin/trunk/spamd/PROTOCOL
-package spamc
+package spamc // import "cgt.name/pkg/spamc"
 
 import (
 	"bufio"
